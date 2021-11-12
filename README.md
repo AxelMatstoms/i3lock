@@ -20,6 +20,11 @@ or similar, use existing tooling to do this before passing it to i3lock.
 - i3lock uses PAM and therefore is compatible with LDAP etc.
   On OpenBSD i3lock uses the bsd_auth(3) framework.
 
+Changes on this fork
+--------------------
+This fork of i3lock changes the colorscheme to use the Nord colorscheme.
+It also adds a small clock widget on the bottom-right of the screen.
+
 Install
 -------
 

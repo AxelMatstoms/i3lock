@@ -1303,8 +1303,10 @@ int main(int argc, char *argv[]) {
     ev_prepare_init(xcb_prepare, xcb_prepare_cb);
     ev_prepare_start(main_loop, xcb_prepare);
 
-    ev_periodic_init(&clock_update, clock_minute_cb, 0., 60., 0);
-    ev_periodic_start(main_loop, &clock_update);
+    if (clock_visible) {
+        ev_periodic_init(&clock_update, clock_minute_cb, 0., 60., 0);
+        ev_periodic_start(main_loop, &clock_update);
+    }
 
     /* Invoke the event callback once to catch all the events which were
      * received up until now. ev will only pick up new events (when the X11

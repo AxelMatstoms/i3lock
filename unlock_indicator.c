@@ -11,6 +11,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
+#include <time.h>
 #include <xcb/xcb.h>
 #include <ev.h>
 #include <cairo.h>
@@ -26,6 +27,10 @@
 #define BUTTON_SPACE (BUTTON_RADIUS + 5)
 #define BUTTON_CENTER (BUTTON_RADIUS + 5)
 #define BUTTON_DIAMETER (2 * BUTTON_SPACE)
+
+#define CLOCK_WIDTH 240
+#define CLOCK_HEIGHT 84
+#define CLOCK_MARGIN 24
 
 #define NORD(n) nord##n[0] / 255.0, nord##n[1] / 255.0, nord##n[2] / 255.0
 
@@ -47,6 +52,9 @@ extern uint32_t last_resolution[2];
 
 /* Whether the unlock indicator is enabled (defaults to true). */
 extern bool unlock_indicator;
+
+/* Whether the clock widget is enabled (defaults to true). */
+extern bool clock_visible;
 
 /* List of pressed modifiers, or NULL if none are pressed. */
 extern char *modifier_string;
@@ -76,22 +84,22 @@ extern xcb_screen_t *screen;
  ******************************************************************************/
 
 /* The nord color scheme */
-static int nord0[]  = { 0x2e, 0x34, 0x40 };
-static int nord1[]  = { 0x3b, 0x42, 0x52 };
-static int nord2[]  = { 0x43, 0x4c, 0x5e };
-static int nord3[]  = { 0x4c, 0x56, 0x6a };
-static int nord4[]  = { 0xd8, 0xde, 0xe9 };
-static int nord5[]  = { 0xe5, 0xe9, 0xf0 };
-static int nord6[]  = { 0xec, 0xef, 0xf4 };
-static int nord7[]  = { 0x8f, 0xbc, 0xbb };
-static int nord8[]  = { 0x88, 0xc0, 0xd0 };
-static int nord9[]  = { 0x81, 0xa1, 0xc1 };
-static int nord10[] = { 0x5e, 0x81, 0xac };
-static int nord11[] = { 0xbf, 0x61, 0x6a };
-static int nord12[] = { 0xd0, 0x87, 0x70 };
-static int nord13[] = { 0xeb, 0xcb, 0x8b };
-static int nord14[] = { 0xa3, 0xbe, 0x8c };
-static int nord15[] = { 0xb4, 0x8e, 0xad };
+static const int nord0[]  __attribute__((unused)) = { 0x2e, 0x34, 0x40 };
+static const int nord1[]  __attribute__((unused)) = { 0x3b, 0x42, 0x52 };
+static const int nord2[]  __attribute__((unused)) = { 0x43, 0x4c, 0x5e };
+static const int nord3[]  __attribute__((unused)) = { 0x4c, 0x56, 0x6a };
+static const int nord4[]  __attribute__((unused)) = { 0xd8, 0xde, 0xe9 };
+static const int nord5[]  __attribute__((unused)) = { 0xe5, 0xe9, 0xf0 };
+static const int nord6[]  __attribute__((unused)) = { 0xec, 0xef, 0xf4 };
+static const int nord7[]  __attribute__((unused)) = { 0x8f, 0xbc, 0xbb };
+static const int nord8[]  __attribute__((unused)) = { 0x88, 0xc0, 0xd0 };
+static const int nord9[]  __attribute__((unused)) = { 0x81, 0xa1, 0xc1 };
+static const int nord10[] __attribute__((unused)) = { 0x5e, 0x81, 0xac };
+static const int nord11[] __attribute__((unused)) = { 0xbf, 0x61, 0x6a };
+static const int nord12[] __attribute__((unused)) = { 0xd0, 0x87, 0x70 };
+static const int nord13[] __attribute__((unused)) = { 0xeb, 0xcb, 0x8b };
+static const int nord14[] __attribute__((unused)) = { 0xa3, 0xbe, 0x8c };
+static const int nord15[] __attribute__((unused)) = { 0xb4, 0x8e, 0xad };
 
 /* Cache the screen’s visual, necessary for creating a Cairo context. */
 static xcb_visualtype_t *vistype;
@@ -109,6 +117,9 @@ auth_state_t auth_state;
 void draw_image(xcb_pixmap_t bg_pixmap, uint32_t *resolution) {
     const double scaling_factor = get_dpi_value() / 96.0;
     int button_diameter_physical = ceil(scaling_factor * BUTTON_DIAMETER);
+    int clock_width_physical = ceil(scaling_factor * CLOCK_WIDTH);
+    int clock_height_physical = ceil(scaling_factor * CLOCK_HEIGHT);
+    int margin_physical = ceil(scaling_factor * CLOCK_MARGIN);
     DEBUG("scaling_factor is %.f, physical diameter is %d px\n",
           scaling_factor, button_diameter_physical);
 
@@ -120,6 +131,9 @@ void draw_image(xcb_pixmap_t bg_pixmap, uint32_t *resolution) {
      * depending on the amount of screens) unlock indicators on. */
     cairo_surface_t *output = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, button_diameter_physical, button_diameter_physical);
     cairo_t *ctx = cairo_create(output);
+
+    cairo_surface_t *clock_output = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, clock_width_physical, clock_height_physical);
+    cairo_t *clk_ctx = cairo_create(clock_output);
 
     cairo_surface_t *xcb_output = cairo_xcb_surface_create(conn, bg_pixmap, vistype, resolution[0], resolution[1]);
     cairo_t *xcb_ctx = cairo_create(xcb_output);
@@ -165,30 +179,13 @@ void draw_image(xcb_pixmap_t bg_pixmap, uint32_t *resolution) {
                   0 /* start */,
                   2 * M_PI /* end */);
 
-        /* Use the appropriate color for the different PAM states
-         * (currently verifying, wrong password, or default) */
-        /*
-        switch (auth_state) {
-            case STATE_AUTH_VERIFY:
-            case STATE_AUTH_LOCK:
-                cairo_set_source_rgb(ctx, NORD(9));
-                break;
-            case STATE_AUTH_WRONG:
-            case STATE_I3LOCK_LOCK_FAILED:
-                cairo_set_source_rgb(ctx, NORD(11));
-                break;
-            default:
-                if (unlock_state == STATE_NOTHING_TO_DELETE) {
-                    cairo_set_source_rgb(ctx, NORD(1));
-                    break;
-                }
-                cairo_set_source_rgb(ctx, NORD(1));
-                break;
-        }
-        */
+        /* Use nord0 for the center of the ring */
         cairo_set_source_rgb(ctx, NORD(1));
         cairo_fill_preserve(ctx);
 
+        /* Use the appropriate color for the different PAM states
+         * (currently verifying, wrong password, or default) for the
+         * outsite of the ring. */
         switch (auth_state) {
             case STATE_AUTH_VERIFY:
             case STATE_AUTH_LOCK:
@@ -344,6 +341,60 @@ void draw_image(xcb_pixmap_t bg_pixmap, uint32_t *resolution) {
         }
     }
 
+    if (clock_visible) {
+        cairo_scale(clk_ctx, scaling_factor, scaling_factor);
+
+        /* Draw the background for the clock */
+        cairo_rectangle(clk_ctx, 1.0, 1.0, CLOCK_WIDTH - 2.0, CLOCK_HEIGHT - 2.0);
+        cairo_set_source_rgb(clk_ctx, NORD(0));
+        cairo_fill_preserve(clk_ctx);
+
+        cairo_set_line_width(clk_ctx, 2.0);
+        cairo_set_source_rgb(clk_ctx, NORD(2));
+        cairo_stroke(clk_ctx);
+
+        time_t t = time(NULL);
+        struct tm *now = localtime(&t);
+
+        char time_text[8];
+        char date_text[32];
+        strftime(time_text, 8, "%H:%M", now);
+        strftime(date_text, 32, "%a, %B %d", now);
+
+        cairo_set_source_rgb(clk_ctx, NORD(4));
+        cairo_select_font_face(clk_ctx, "Fira Mono", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
+        cairo_set_font_size(clk_ctx, 48.0);
+
+        cairo_text_extents_t extents;
+        cairo_text_extents(clk_ctx, time_text, &extents);
+
+        double x = CLOCK_WIDTH / 2.0 - (extents.width / 2 + extents.x_bearing);
+        double y = 12.0 + extents.height;
+
+        cairo_move_to(clk_ctx, x, y);
+        cairo_show_text(clk_ctx, time_text);
+        cairo_close_path(clk_ctx);
+
+        cairo_set_line_width(clk_ctx, 2.0);
+        cairo_set_source_rgb(clk_ctx, NORD(7));
+        cairo_move_to(clk_ctx, x - 4.0, y + 4.0);
+        cairo_rel_line_to(clk_ctx, extents.width + 8.0, 0.0);
+
+        cairo_stroke(clk_ctx);
+
+        cairo_set_source_rgb(clk_ctx, NORD(4));
+        cairo_set_font_size(clk_ctx, 16.0);
+
+        cairo_text_extents_t extents2;
+        cairo_text_extents(clk_ctx, date_text, &extents2);
+
+        double x2 = CLOCK_WIDTH / 2.0 - (extents2.width / 2 + extents2.x_bearing);
+        double y2 = CLOCK_HEIGHT - 12.0;
+
+        cairo_move_to(clk_ctx, x2, y2);
+        cairo_show_text(clk_ctx, date_text);
+    }
+
     if (xr_screens > 0) {
         /* Composite the unlock indicator in the middle of each screen. */
         for (int screen = 0; screen < xr_screens; screen++) {
@@ -351,6 +402,13 @@ void draw_image(xcb_pixmap_t bg_pixmap, uint32_t *resolution) {
             int y = (xr_resolutions[screen].y + ((xr_resolutions[screen].height / 2) - (button_diameter_physical / 2)));
             cairo_set_source_surface(xcb_ctx, output, x, y);
             cairo_rectangle(xcb_ctx, x, y, button_diameter_physical, button_diameter_physical);
+            cairo_fill(xcb_ctx);
+
+            int x2 = xr_resolutions[screen].x + xr_resolutions[screen].width - clock_width_physical - margin_physical;
+            int y2 = xr_resolutions[screen].y + xr_resolutions[screen].height - clock_height_physical - margin_physical;
+
+            cairo_set_source_surface(xcb_ctx, clock_output, x2, y2);
+            cairo_rectangle(xcb_ctx, x2, y2, clock_width_physical, clock_height_physical);
             cairo_fill(xcb_ctx);
         }
     } else {
@@ -362,12 +420,21 @@ void draw_image(xcb_pixmap_t bg_pixmap, uint32_t *resolution) {
         cairo_set_source_surface(xcb_ctx, output, x, y);
         cairo_rectangle(xcb_ctx, x, y, button_diameter_physical, button_diameter_physical);
         cairo_fill(xcb_ctx);
+
+        int x2 = last_resolution[0] - clock_width_physical - margin_physical;
+        int y2 = last_resolution[1] - clock_height_physical - margin_physical;
+
+        cairo_set_source_surface(xcb_ctx, clock_output, x2, y2);
+        cairo_rectangle(xcb_ctx, x2, y2, clock_width_physical, clock_height_physical);
+        cairo_fill(xcb_ctx);
     }
 
     cairo_surface_destroy(xcb_output);
     cairo_surface_destroy(output);
+    cairo_surface_destroy(clock_output);
     cairo_destroy(ctx);
     cairo_destroy(xcb_ctx);
+    cairo_destroy(clk_ctx);
 }
 
 static xcb_pixmap_t bg_pixmap = XCB_NONE;

@@ -71,6 +71,7 @@ static char password[512];
 static bool beep = false;
 bool debug_mode = false;
 bool unlock_indicator = true;
+bool clock_visible = true;
 char *modifier_string = NULL;
 static bool dont_fork = false;
 struct ev_loop *main_loop;
@@ -267,6 +268,10 @@ static void clear_input(void) {
 static void discard_passwd_cb(EV_P_ ev_timer *w, int revents) {
     clear_input();
     STOP_TIMER(discard_passwd_timeout);
+}
+
+static void clock_minute_cb(EV_P_ ev_periodic *p, int revents) {
+    redraw_screen();
 }
 
 static void input_done(void) {
@@ -1026,6 +1031,7 @@ int main(int argc, char *argv[]) {
         {"debug", no_argument, NULL, 0},
         {"help", no_argument, NULL, 'h'},
         {"no-unlock-indicator", no_argument, NULL, 'u'},
+        {"no-clock", no_argument, NULL, 'C'},
         {"image", required_argument, NULL, 'i'},
         {"raw", required_argument, NULL, 0},
         {"tiling", no_argument, NULL, 't'},
@@ -1074,6 +1080,9 @@ int main(int argc, char *argv[]) {
             case 'u':
                 unlock_indicator = false;
                 break;
+            case 'C':
+                clock_visible = false;
+                break;
             case 'i':
                 image_path = strdup(optarg);
                 break;
@@ -1102,7 +1111,7 @@ int main(int argc, char *argv[]) {
                 show_failed_attempts = true;
                 break;
             default:
-                errx(EXIT_FAILURE, "Syntax: i3lock [-v] [-n] [-b] [-d] [-c color] [-u] [-p win|default]"
+                errx(EXIT_FAILURE, "Syntax: i3lock [-v] [-n] [-b] [-d] [-c color] [-u] [-C] [-p win|default]"
                                    " [-i image.png] [-t] [-e] [-I timeout] [-f]");
         }
     }
@@ -1283,6 +1292,7 @@ int main(int argc, char *argv[]) {
     struct ev_io *xcb_watcher = calloc(sizeof(struct ev_io), 1);
     struct ev_check *xcb_check = calloc(sizeof(struct ev_check), 1);
     struct ev_prepare *xcb_prepare = calloc(sizeof(struct ev_prepare), 1);
+    struct ev_periodic clock_update;
 
     ev_io_init(xcb_watcher, xcb_got_event, xcb_get_file_descriptor(conn), EV_READ);
     ev_io_start(main_loop, xcb_watcher);
@@ -1292,6 +1302,9 @@ int main(int argc, char *argv[]) {
 
     ev_prepare_init(xcb_prepare, xcb_prepare_cb);
     ev_prepare_start(main_loop, xcb_prepare);
+
+    ev_periodic_init(&clock_update, clock_minute_cb, 0., 60., 0);
+    ev_periodic_start(main_loop, &clock_update);
 
     /* Invoke the event callback once to catch all the events which were
      * received up until now. ev will only pick up new events (when the X11
